@@ -251,6 +251,10 @@ struct model_config {
 	 * fans don't respond. Hide fan_fullspeed/fan_maxspeed sysfs attributes.
 	 */
 	bool fan_fullspeed_unsupported;
+
+	/* Set true to skip registering non-functional LED controls */
+	bool no_ylogo_light;
+	bool no_ioport_light;
 };
 
 /* =================================== */
@@ -1075,6 +1079,8 @@ static const struct model_config model_q7cn = {
 	/* Gamezone WMI (FAN_GET/SET_FULLSPEED) can crash EC 0x5508; use OtherMethod */
 	.access_method_fanfullspeed = ACCESS_METHOD_WMI3,
 	.fan_fullspeed_unsupported = true,
+	.no_ylogo_light = true,
+	.no_ioport_light = true,
 	.fancurve_wmi_64byte = true,
 	.acpi_check_dev = false,
 	.ramio_physical_start = 0xFE0B0400,
@@ -1108,6 +1114,8 @@ static const struct model_config model_smcn = {
 	/* Gamezone WMI (FAN_GET/SET_FULLSPEED) can crash EC 0x5508; use OtherMethod */
 	.access_method_fanfullspeed = ACCESS_METHOD_WMI3,
 	.fan_fullspeed_unsupported = true,
+	.no_ylogo_light = true,
+	.no_ioport_light = true,
 	.fancurve_wmi_64byte = true,
 	.acpi_check_dev = false,
 	.ramio_physical_start = 0xFE00D400,
@@ -1590,20 +1598,20 @@ static int acpi_process_buffer_to_ints(const char *id_name, int id_nr,
 	int error = 0;
 
 	if (ACPI_FAILURE(status)) {
-		pr_info("ACPI evaluation error for: %s:%d\n", id_name, id_nr);
+		pr_debug("ACPI evaluation error for: %s:%d\n", id_name, id_nr);
 		error = -EFAULT;
 		goto err;
 	}
 
 	out = out_buffer->pointer;
 	if (!out) {
-		pr_info("Unexpected ACPI result for %s:%d\n", id_name, id_nr);
+		pr_debug("Unexpected ACPI result for %s:%d\n", id_name, id_nr);
 		error = -EIO;
 		goto err;
 	}
 
 	if (out->type != ACPI_TYPE_BUFFER || out->buffer.length != ressize) {
-		pr_info("Unexpected ACPI result for %s:%d: expected type %d but got %d; expected length %zu but got %u;\n",
+		pr_debug("Unexpected ACPI result for %s:%d: expected type %d but got %d; expected length %zu but got %u;\n",
 			id_name, id_nr, ACPI_TYPE_BUFFER, out->type, ressize,
 			out->buffer.length);
 		error = -EIO;
@@ -1645,20 +1653,20 @@ static int wmi_exec_int(const char *guid, u8 instance, u32 method_id,
 				     &out_buffer);
 
 	if (ACPI_FAILURE(status)) {
-		pr_info("WMI evaluation error for: %s:%d\n", guid, method_id);
+		pr_debug("WMI evaluation error for: %s:%d\n", guid, method_id);
 		error = -EFAULT;
 		goto err;
 	}
 
 	out = out_buffer.pointer;
 	if (!out) {
-		pr_info("Unexpected ACPI result for %s:%d\n", guid, method_id);
+		pr_debug("Unexpected ACPI result for %s:%d\n", guid, method_id);
 		error = -EIO;
 		goto err;
 	}
 
 	if (out->type != ACPI_TYPE_INTEGER) {
-		pr_info("Unexpected ACPI result for %s:%d: expected type %d but got %d\n",
+		pr_debug("Unexpected ACPI result for %s:%d: expected type %d but got %d\n",
 			guid, method_id, ACPI_TYPE_INTEGER, out->type);
 		error = -EIO;
 		goto err;
@@ -4267,6 +4275,48 @@ static void legion_debugfs_exit(struct legion_private *priv)
 /* sysfs interface                */
 /* ============================   */
 
+static ssize_t show_other_method_attribute(struct device *dev,
+					   struct device_attribute *attr,
+					   char *buf,
+					   enum OtherMethodFeature feature_id)
+{
+	int value = 0;
+	int err;
+	struct legion_private *priv = dev_get_drvdata(dev);
+
+	mutex_lock(&priv->fancurve_mutex);
+	err = wmi_other_method_get_value(feature_id, &value);
+	mutex_unlock(&priv->fancurve_mutex);
+
+	if (err)
+		return err;
+
+	return sysfs_emit(buf, "%d\n", value);
+}
+
+static ssize_t store_other_method_attribute(struct device *dev,
+					    struct device_attribute *attr,
+					    const char *buf, size_t count,
+					    enum OtherMethodFeature feature_id)
+{
+	int value;
+	int err;
+	struct legion_private *priv = dev_get_drvdata(dev);
+
+	err = kstrtoint(buf, 0, &value);
+	if (err)
+		return err;
+
+	mutex_lock(&priv->fancurve_mutex);
+	err = wmi_other_method_set_value(feature_id, value);
+	mutex_unlock(&priv->fancurve_mutex);
+
+	if (err)
+		return err;
+
+	return count;
+}
+
 static int show_simple_wmi_attribute(struct device *dev,
 				     struct device_attribute *attr, char *buf,
 				     const char *guid, u8 instance,
@@ -4612,18 +4662,30 @@ static ssize_t cpu_shortterm_powerlimit_show(struct device *dev,
 					     struct device_attribute *attr,
 					     char *buf)
 {
-	return show_simple_wmi_attribute_from_buffer(
+	ssize_t ret;
+
+	ret = show_simple_wmi_attribute_from_buffer(
 		dev, attr, buf, WMI_GUID_LENOVO_CPU_METHOD, 0,
 		WMI_METHOD_ID_CPU_GET_SHORTTERM_POWERLIMIT, 16, 0, 1);
+	if (ret < 0)
+		ret = show_other_method_attribute(dev, attr, buf,
+			OtherMethodFeature_CPU_SHORT_TERM_POWER_LIMIT);
+	return ret;
 }
 
 static ssize_t cpu_shortterm_powerlimit_store(struct device *dev,
 					      struct device_attribute *attr,
 					      const char *buf, size_t count)
 {
-	return store_simple_wmi_attribute(
+	ssize_t ret;
+
+	ret = store_simple_wmi_attribute(
 		dev, attr, buf, count, WMI_GUID_LENOVO_CPU_METHOD, 0,
 		WMI_METHOD_ID_CPU_SET_SHORTTERM_POWERLIMIT, false, 1);
+	if (ret < 0)
+		ret = store_other_method_attribute(dev, attr, buf, count,
+			OtherMethodFeature_CPU_SHORT_TERM_POWER_LIMIT);
+	return ret;
 }
 
 static DEVICE_ATTR_RW(cpu_shortterm_powerlimit);
@@ -4632,18 +4694,30 @@ static ssize_t cpu_longterm_powerlimit_show(struct device *dev,
 					    struct device_attribute *attr,
 					    char *buf)
 {
-	return show_simple_wmi_attribute_from_buffer(
+	ssize_t ret;
+
+	ret = show_simple_wmi_attribute_from_buffer(
 		dev, attr, buf, WMI_GUID_LENOVO_CPU_METHOD, 0,
 		WMI_METHOD_ID_CPU_GET_LONGTERM_POWERLIMIT, 16, 0, 1);
+	if (ret < 0)
+		ret = show_other_method_attribute(dev, attr, buf,
+			OtherMethodFeature_CPU_LONG_TERM_POWER_LIMIT);
+	return ret;
 }
 
 static ssize_t cpu_longterm_powerlimit_store(struct device *dev,
 					     struct device_attribute *attr,
 					     const char *buf, size_t count)
 {
-	return store_simple_wmi_attribute(
+	ssize_t ret;
+
+	ret = store_simple_wmi_attribute(
 		dev, attr, buf, count, WMI_GUID_LENOVO_CPU_METHOD, 0,
 		WMI_METHOD_ID_CPU_SET_LONGTERM_POWERLIMIT, false, 1);
+	if (ret < 0)
+		ret = store_other_method_attribute(dev, attr, buf, count,
+			OtherMethodFeature_CPU_LONG_TERM_POWER_LIMIT);
+	return ret;
 }
 
 static DEVICE_ATTR_RW(cpu_longterm_powerlimit);
@@ -4705,18 +4779,30 @@ static ssize_t cpu_cross_loading_powerlimit_show(struct device *dev,
 						 struct device_attribute *attr,
 						 char *buf)
 {
-	return show_simple_wmi_attribute(
+	ssize_t ret;
+
+	ret = show_simple_wmi_attribute(
 		dev, attr, buf, WMI_GUID_LENOVO_CPU_METHOD, 0,
 		WMI_METHOD_ID_CPU_GET_CROSS_LOADING_POWERLIMIT, false, 1);
+	if (ret < 0)
+		ret = show_other_method_attribute(dev, attr, buf,
+			OtherMethodFeature_CPU_CROSS_LOAD_POWER_LIMIT);
+	return ret;
 }
 
 static ssize_t cpu_cross_loading_powerlimit_store(struct device *dev,
 						  struct device_attribute *attr,
 						  const char *buf, size_t count)
 {
-	return store_simple_wmi_attribute(
+	ssize_t ret;
+
+	ret = store_simple_wmi_attribute(
 		dev, attr, buf, count, WMI_GUID_LENOVO_CPU_METHOD, 0,
 		WMI_METHOD_ID_CPU_SET_CROSS_LOADING_POWERLIMIT, false, 1);
+	if (ret < 0)
+		ret = store_other_method_attribute(dev, attr, buf, count,
+			OtherMethodFeature_CPU_CROSS_LOAD_POWER_LIMIT);
+	return ret;
 }
 
 static DEVICE_ATTR_RW(cpu_cross_loading_powerlimit);
@@ -4745,19 +4831,31 @@ static ssize_t gpu_ppab_powerlimit_show(struct device *dev,
 					struct device_attribute *attr,
 					char *buf)
 {
-	return show_simple_wmi_attribute_from_buffer(
+	ssize_t ret;
+
+	ret = show_simple_wmi_attribute_from_buffer(
 		dev, attr, buf, WMI_GUID_LENOVO_GPU_METHOD, 0,
 		WMI_METHOD_ID_GPU_GET_PPAB_POWERLIMIT, 16, 0, 1);
+	if (ret < 0)
+		ret = show_other_method_attribute(dev, attr, buf,
+			OtherMethodFeature_GPU_POWER_BOOST);
+	return ret;
 }
 
 static ssize_t gpu_ppab_powerlimit_store(struct device *dev,
 					 struct device_attribute *attr,
 					 const char *buf, size_t count)
 {
-	return store_simple_wmi_attribute(dev, attr, buf, count,
+	ssize_t ret;
+
+	ret = store_simple_wmi_attribute(dev, attr, buf, count,
 					  WMI_GUID_LENOVO_GPU_METHOD, 0,
 					  WMI_METHOD_ID_GPU_SET_PPAB_POWERLIMIT,
 					  false, 1);
+	if (ret < 0)
+		ret = store_other_method_attribute(dev, attr, buf, count,
+			OtherMethodFeature_GPU_POWER_BOOST);
+	return ret;
 }
 
 static DEVICE_ATTR_RW(gpu_ppab_powerlimit);
@@ -4766,19 +4864,31 @@ static ssize_t gpu_ctgp_powerlimit_show(struct device *dev,
 					struct device_attribute *attr,
 					char *buf)
 {
-	return show_simple_wmi_attribute_from_buffer(
+	ssize_t ret;
+
+	ret = show_simple_wmi_attribute_from_buffer(
 		dev, attr, buf, WMI_GUID_LENOVO_GPU_METHOD, 0,
 		WMI_METHOD_ID_GPU_GET_CTGP_POWERLIMIT, 16, 0, 1);
+	if (ret < 0)
+		ret = show_other_method_attribute(dev, attr, buf,
+			OtherMethodFeature_GPU_cTGP);
+	return ret;
 }
 
 static ssize_t gpu_ctgp_powerlimit_store(struct device *dev,
 					 struct device_attribute *attr,
 					 const char *buf, size_t count)
 {
-	return store_simple_wmi_attribute(dev, attr, buf, count,
+	ssize_t ret;
+
+	ret = store_simple_wmi_attribute(dev, attr, buf, count,
 					  WMI_GUID_LENOVO_GPU_METHOD, 0,
 					  WMI_METHOD_ID_GPU_SET_CTGP_POWERLIMIT,
 					  false, 1);
+	if (ret < 0)
+		ret = store_other_method_attribute(dev, attr, buf, count,
+			OtherMethodFeature_GPU_cTGP);
+	return ret;
 }
 
 static DEVICE_ATTR_RW(gpu_ctgp_powerlimit);
@@ -5043,8 +5153,12 @@ static struct attribute *legion_sysfs_attributes[] = {
  *
  * Gamezone WMI: gsync, overdrive, thermalmode, powerchargemode,
  *               cpumaxfrequency, igpumode (writes ignored or garbage reads)
- * CPU WMI:      cpu_oc, cpu_*_powerlimit (reads fail with -EINVAL or return 0)
- * GPU WMI:      gpu_oc, gpu_* (reads fail with -EINVAL)
+ * CPU WMI:      cpu_oc (reads fail with -EINVAL)
+ * GPU WMI:      gpu_oc, gpu_ctgp2, gpu_default_ppab_ctrgp, gpu_temperature_limit,
+ *               gpu_boost_clock (reads fail with -EINVAL)
+ *
+ * Note: cpu_{shortterm,longterm,cross_loading}_powerlimit and
+ * gpu_{ppab,ctgp}_powerlimit now work via WMAE OtherMethod fallback.
  */
 static const struct attribute *it5508_broken_attrs[] = {
 	&dev_attr_gsync.attr,
@@ -5054,15 +5168,10 @@ static const struct attribute *it5508_broken_attrs[] = {
 	&dev_attr_cpumaxfrequency.attr,
 	&dev_attr_igpumode.attr,
 	&dev_attr_cpu_oc.attr,
-	&dev_attr_cpu_shortterm_powerlimit.attr,
-	&dev_attr_cpu_longterm_powerlimit.attr,
 	&dev_attr_cpu_default_powerlimit.attr,
 	&dev_attr_cpu_peak_powerlimit.attr,
 	&dev_attr_cpu_apu_sppt_powerlimit.attr,
-	&dev_attr_cpu_cross_loading_powerlimit.attr,
 	&dev_attr_gpu_oc.attr,
-	&dev_attr_gpu_ppab_powerlimit.attr,
-	&dev_attr_gpu_ctgp_powerlimit.attr,
 	&dev_attr_gpu_ctgp2_powerlimit.attr,
 	&dev_attr_gpu_default_ppab_ctrgp_powerlimit.attr,
 	&dev_attr_gpu_temperature_limit.attr,
@@ -6624,18 +6733,24 @@ static int legion_add(struct platform_device *pdev)
 			"Failed to init keyboard backlight LED driver. Skipping ...\n");
 	}
 
-	err = legion_light_init(priv, &priv->ylogo_light, LIGHT_ID_YLOGO, 0, 1,
-				"platform::ylogo");
-	if (err) {
-		dev_info(&pdev->dev,
-			 "Failed to init Y-Logo LED driver. Skipping ...\n");
+	if (!priv->conf->no_ylogo_light) {
+		err = legion_light_init(priv, &priv->ylogo_light,
+					LIGHT_ID_YLOGO, 0, 1,
+					"platform::ylogo");
+		if (err) {
+			dev_info(&pdev->dev,
+				 "Failed to init Y-Logo LED driver. Skipping ...\n");
+		}
 	}
 
-	err = legion_light_init(priv, &priv->iport_light, LIGHT_ID_IOPORT, 0, 2,
-				"platform::ioport");
-	if (err) {
-		dev_info(&pdev->dev,
-			 "Failed to init IO-Port LED driver. Skipping ...\n");
+	if (!priv->conf->no_ioport_light) {
+		err = legion_light_init(priv, &priv->iport_light,
+					LIGHT_ID_IOPORT, 0, 2,
+					"platform::ioport");
+		if (err) {
+			dev_info(&pdev->dev,
+				 "Failed to init IO-Port LED driver. Skipping ...\n");
+		}
 	}
 
 	dev_info(&pdev->dev, "legion_laptop loaded for this device\n");
