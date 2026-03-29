@@ -4185,6 +4185,21 @@ static int debugfs_fancurve_show(struct seq_file *s, void *unused)
 	err = wmi_read_fanspeed_other(1, &fanspeed);
 	seq_file_print_with_error(s, "2 fanspeed WMI3", err, fanspeed);
 
+	if (priv->conf->num_fans > 2) {
+		err = read_fanspeed(priv, 2, &fanspeed);
+		seq_file_print_with_error(s, "3 fanspeed", err, fanspeed);
+		err = ec_read_fanspeed(&priv->ecram, priv->conf, 2, &fanspeed);
+		seq_file_print_with_error(s, "3 fanspeed EC", err, fanspeed);
+		err = acpi_read_fanspeed(priv, 2, &fanspeed);
+		seq_file_print_with_error(s, "3 fanspeed ACPI", err, fanspeed);
+		err = wmi_read_fanspeed_gz(2, &fanspeed);
+		seq_file_print_with_error(s, "3 fanspeed WMI", err, fanspeed);
+		err = wmi_read_fanspeed(2, &fanspeed);
+		seq_file_print_with_error(s, "3 fanspeed WMI2", err, fanspeed);
+		err = wmi_read_fanspeed_other(2, &fanspeed);
+		seq_file_print_with_error(s, "3 fanspeed WMI3", err, fanspeed);
+	}
+
 	seq_printf(s, "powermode access method: %d\n",
 		   priv->conf->access_method_powermode);
 	err = read_powermode(priv, &powermode);
