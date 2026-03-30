@@ -429,6 +429,53 @@ static const struct ec_register_offsets ec_register_offsets_loq_v0 = {
 	.EXT_WHITE_KEYBOARD_BACKLIGHT = 0xC5a0 // not found yet
 };
 
+/*
+ * EC register offsets for IT5508 (SMCN) — AMD Gen 10 Legion Pro 7 16AFR10H
+ * Derived from gluceri's ACPI/DSDT analysis and ecmemory hex dump verification.
+ * Since SMCN uses ACCESS_METHOD_WMI3 for temp/fanspeed/fancurve, most of these
+ * offsets only affect the debug sysfs output (ec_read_sensor_values).
+ * Registers marked "unverified" are inherited from v0 and may be wrong.
+ */
+static const struct ec_register_offsets ec_register_offsets_smcn = {
+	/* Super I/O chip ID regs — same across all ITE ECs */
+	.ECHIPID1 = 0x2000,
+	.ECHIPID2 = 0x2001,
+	.ECHIPVER = 0x2002,
+	.ECDEBUG = 0x2003,
+	/* Fan curve — not used with ACCESS_METHOD_WMI3, unverified for SMCN */
+	.EXT_FAN_CUR_POINT = 0xC534,
+	.EXT_FAN_POINTS_SIZE = 0xC535,
+	.EXT_FAN1_BASE = 0xC540,
+	.EXT_FAN2_BASE = 0xC550,
+	.EXT_FAN_ACC_BASE = 0xC560,
+	.EXT_FAN_DEC_BASE = 0xC570,
+	.EXT_CPU_TEMP = 0xC580,
+	.EXT_CPU_TEMP_HYST = 0xC590,
+	.EXT_GPU_TEMP = 0xC5A0,
+	.EXT_GPU_TEMP_HYST = 0xC5B0,
+	.EXT_VRM_TEMP = 0xC5C0,
+	.EXT_VRM_TEMP_HYST = 0xC5D0,
+	/* Fan RPM — not used with ACCESS_METHOD_WMI3, unverified for SMCN.
+	 * Note: IT5508 may use single-byte ACPI-style RPM (value * 100)
+	 * rather than the 2-byte LSB/MSB format these fields expect. */
+	.EXT_FAN1_RPM_LSB = 0xC5E0,
+	.EXT_FAN1_RPM_MSB = 0xC5E1,
+	.EXT_FAN2_RPM_LSB = 0xC5E2,
+	.EXT_FAN2_RPM_MSB = 0xC5E3,
+	.EXT_MINIFANCURVE_ON_COOL = 0xC536,
+	.EXT_LOCKFANCONTROLLER = 0xC4AB, /* unverified for SMCN */
+	/* Confirmed from hex dump: offset 0x20 from base = 0x40 (64 dec) */
+	.EXT_POWERMODE = 0xC420,
+	.EXT_FAN1_TARGET_RPM = 0xC600, /* unverified for SMCN */
+	.EXT_FAN2_TARGET_RPM = 0xC601, /* unverified for SMCN */
+	.EXT_MAXIMUMFANSPEED = 0xBD,
+	.EXT_WHITE_KEYBOARD_BACKLIGHT = (0x3B + 0xC400),
+	/* Confirmed by gluceri via ACPI DSDT + hex dump cross-reference */
+	.EXT_CPU_TEMP_INPUT = 0xC4B0,
+	.EXT_GPU_TEMP_INPUT = 0xC4B4,
+	.EXT_IC_TEMP_INPUT = 0xC5E8, /* unverified for SMCN */
+};
+
 static const struct model_config model_v0 = {
 	.registers = &ec_register_offsets_v0,
 	.check_embedded_controller_id = true,
@@ -1102,7 +1149,7 @@ static const struct model_config model_q7cn = {
  * EC direct reads give wrong values; WMI3 access methods required.
  */
 static const struct model_config model_smcn = {
-	.registers = &ec_register_offsets_v0,
+	.registers = &ec_register_offsets_smcn,
 	.check_embedded_controller_id = true,
 	.embedded_controller_id = 0x5508,
 	.memoryio_physical_ec_start = 0xC400,
