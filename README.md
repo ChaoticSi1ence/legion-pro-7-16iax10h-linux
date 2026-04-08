@@ -147,6 +147,36 @@ sudo bash tests/test_hardware_q7cn_smcn.sh --test-extreme
 
 ---
 
+## Kernel 7.0+ — Driver Retirement
+
+**Do not load `legion-laptop` on Linux 7.0 or later.** The upstream kernel now includes the `lenovo_wmi_*` module stack which replaces this driver's functionality:
+
+| Feature | This driver | Upstream 7.0 replacement |
+|---------|------------|--------------------------|
+| Fan RPM monitoring (3 fans) | `legion-laptop` (EC/WMI3) | `lenovo_wmi_other` (hwmon) |
+| Fan target RPM setting | — | `lenovo_wmi_other` (fan*_target) |
+| Power modes (Quiet/Balanced/Performance) | `legion-laptop` (WMI SetSmartFanMode) | `lenovo_wmi_gamezone` (same WMI calls) |
+| GPU power tuning (CTGP/PPAB/offsets) | — | `lenovo_wmi_other` (firmware attributes) |
+| CPU power limits (PL1/PL2/tau) | — | `lenovo_wmi_other` (firmware attributes) |
+| WMI hotkeys & events | `legion-laptop` | `lenovo_wmi_events` + `lenovo_wmi_hotkey_utilities` |
+| Platform profile (PPD integration) | `legion-laptop` | `lenovo_wmi_gamezone` + `ideapad_laptop` |
+
+**Features not yet upstream** (minor):
+- EC-reported CPU/GPU/IC temperature sensors in hwmon (use `coretemp` for CPU temps instead)
+- Custom PWM fan curves
+- Rapid charge toggle
+- Windows key disable
+
+**If upgrading to 7.0+:**
+1. Remove `/etc/modprobe.d/blacklist-lenovo-wmi.conf`
+2. Remove `/etc/modules-load.d/legion-laptop.conf`
+3. Uninstall via DKMS if applicable: `sudo dkms remove LenovoLegionLinux/0.1.0 --all`
+4. Reboot — the upstream modules auto-load via WMI GUID and ACPI matching
+
+> **Note:** Custom power mode (255) still causes a hard shutdown on Q7CN/SMCN hardware. The upstream `lenovo_wmi_gamezone` does **not** guard against this — avoid setting custom mode via sysfs.
+
+---
+
 ## Known Limitations
 
 - **Custom power mode (255) causes hard shutdown** — blocked by default. Override with `allow_custom_mode=1` at your own risk.
