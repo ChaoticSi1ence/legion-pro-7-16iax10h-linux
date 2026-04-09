@@ -1175,7 +1175,7 @@ static const struct model_config model_smcn = {
 	.no_ioport_light = true,
 	.fancurve_wmi_64byte = true,
 	.acpi_check_dev = false,
-	.ramio_physical_start = 0xFEEC2400, // ERAX address from AMD DSDT; verify: ecmemoryram[0..0x2FF] should match ecmemory
+	.ramio_physical_start = 0xFEEC2400,
 	.ramio_size = 0x600
 };
 
