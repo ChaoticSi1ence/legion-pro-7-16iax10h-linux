@@ -32,12 +32,6 @@
 | WMI hotkeys & events | `legion-laptop` | `lenovo_wmi_events` + `lenovo_wmi_hotkey_utilities` |
 | Platform profile (PPD integration) | `legion-laptop` | `lenovo_wmi_gamezone` + `ideapad_laptop` |
 
-**Features not yet upstream** (minor):
-- EC-reported CPU/GPU/IC temperature sensors in hwmon (use `coretemp` for CPU temps instead)
-- Custom PWM fan curves
-- Rapid charge toggle
-- Windows key disable
-
 **If upgrading to 7.0+:**
 1. Remove `/etc/modprobe.d/blacklist-lenovo-wmi.conf`
 2. Remove `/etc/modules-load.d/legion-laptop.conf`
