@@ -38,8 +38,6 @@
 3. Uninstall via DKMS if applicable: `sudo dkms remove LenovoLegionLinux/0.1.0 --all`
 4. Reboot — the upstream modules auto-load via WMI GUID and ACPI matching
 
-> **Note:** Custom power mode (255) still causes a hard shutdown on Q7CN/SMCN hardware. The upstream `lenovo_wmi_gamezone` does **not** guard against this — avoid setting custom mode via sysfs.
-
 ---
 
 ## What's Changed
